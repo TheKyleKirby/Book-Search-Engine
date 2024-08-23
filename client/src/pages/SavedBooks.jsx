@@ -1,100 +1,104 @@
-import { useState, useEffect } from 'react';
-import {
-  Container,
-  Card,
-  Button,
-  Row,
-  Col
-} from 'react-bootstrap';
+import React from "react";
+import { Container, Card, Button, Row, Col } from "react-bootstrap";
 
-import { getMe, deleteBook } from '../utils/API';
-import Auth from '../utils/auth';
-import { removeBookId } from '../utils/localStorage';
+// Import Apollo Client hooks and custom utilities.
+import { useQuery, useMutation } from "@apollo/client";
+import { GET_ME } from "../utils/queries";
+import { REMOVE_BOOK } from "../utils/mutations";
+import Auth from "../utils/auth";
+import { removeBookId } from "../utils/localStorage";
 
 const SavedBooks = () => {
-  const [userData, setUserData] = useState({});
+  // Use Apollo Client hooks to fetch user data and set up removeBook mutation.
+  const { loading, data } = useQuery(GET_ME);
+  const [removeBook] = useMutation(REMOVE_BOOK);
 
-  // use this to determine if `useEffect()` hook needs to run again
-  const userDataLength = Object.keys(userData).length;
+  // Extract user data from query result, or use empty object if data not yet loaded.
+  const userData = data?.me || {};
 
-  useEffect(() => {
-    const getUserData = async () => {
-      try {
-        const token = Auth.loggedIn() ? Auth.getToken() : null;
-
-        if (!token) {
-          return false;
-        }
-
-        const response = await getMe(token);
-
-        if (!response.ok) {
-          throw new Error('something went wrong!');
-        }
-
-        const user = await response.json();
-        setUserData(user);
-      } catch (err) {
-        console.error(err);
-      }
-    };
-
-    getUserData();
-  }, [userDataLength]);
-
-  // create function that accepts the book's mongo _id value as param and deletes the book from the database
+  // Function to handle book deletion.
   const handleDeleteBook = async (bookId) => {
-    const token = Auth.loggedIn() ? Auth.getToken() : null;
-
-    if (!token) {
+    // Check if user is logged in.
+    if (!Auth.loggedIn()) {
       return false;
     }
 
     try {
-      const response = await deleteBook(bookId, token);
+      // Execute removeBook mutation.
+      const { data } = await removeBook({
+        variables: { bookId },
+        // Update Apollo cache after successful mutation.
+        update: (cache) => {
+          const { me } = cache.readQuery({ query: GET_ME });
+          cache.writeQuery({
+            query: GET_ME,
+            data: {
+              me: {
+                ...me,
+                savedBooks: me.savedBooks.filter(
+                  (book) => book.bookId !== bookId
+                ),
+              },
+            },
+          });
+        },
+      });
 
-      if (!response.ok) {
-        throw new Error('something went wrong!');
+      // Check if the mutation was successful.
+      if (data && data.removeBook) {
+        // Upon success, remove book's id from localStorage.
+        removeBookId(bookId);
+      } else {
+        throw new Error("Failed to remove book");
       }
-
-      const updatedUser = await response.json();
-      setUserData(updatedUser);
-      // upon success, remove book's id from localStorage
-      removeBookId(bookId);
     } catch (err) {
       console.error(err);
     }
   };
 
-  // if data isn't here yet, say so
-  if (!userDataLength) {
+  // if data isn't here yet, say so.
+  if (loading) {
     return <h2>LOADING...</h2>;
   }
 
   return (
     <>
-      <div fluid className="text-light bg-dark p-5">
+      {/* Header section */}
+      <div className="text-light bg-dark p-5 container-fluid">
         <Container>
           <h1>Viewing saved books!</h1>
         </Container>
       </div>
       <Container>
-        <h2 className='pt-5'>
-          {userData.savedBooks.length
-            ? `Viewing ${userData.savedBooks.length} saved ${userData.savedBooks.length === 1 ? 'book' : 'books'}:`
-            : 'You have no saved books!'}
+        {/* Display number of saved books or message if no books saved */}
+        <h2 className="pt-5">
+          {userData.savedBooks?.length
+            ? `Viewing ${userData.savedBooks.length} saved ${
+                userData.savedBooks.length === 1 ? "book" : "books"
+              }:`
+            : "You have no saved books!"}
         </h2>
         <Row>
-          {userData.savedBooks.map((book) => {
+          {/* Map over saved books and render a card for each */}
+          {userData.savedBooks?.map((book) => {
             return (
-              <Col md="4">
-                <Card key={book.bookId} border='dark'>
-                  {book.image ? <Card.Img src={book.image} alt={`The cover for ${book.title}`} variant='top' /> : null}
+              <Col md="4" key={book.bookId}>
+                <Card border="dark">
+                  {book.image ? (
+                    <Card.Img
+                      src={book.image}
+                      alt={`The cover for ${book.title}`}
+                      variant="top"
+                    />
+                  ) : null}
                   <Card.Body>
                     <Card.Title>{book.title}</Card.Title>
-                    <p className='small'>Authors: {book.authors}</p>
+                    <p className="small">Authors: {book.authors}</p>
                     <Card.Text>{book.description}</Card.Text>
-                    <Button className='btn-block btn-danger' onClick={() => handleDeleteBook(book.bookId)}>
+                    <Button
+                      className="btn-block btn-danger"
+                      onClick={() => handleDeleteBook(book.bookId)}
+                    >
                       Delete this Book!
                     </Button>
                   </Card.Body>
